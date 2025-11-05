@@ -4,7 +4,9 @@ import {
   useMediaStream,
   useDataChannel,
   useRemoteTracks,
+  GeminiConfig,
 } from '@webrtc-enterprise/client';
+import { GeminiConfigPanel } from './GeminiConfig';
 
 const SIGNALING_URL = 'ws://localhost:8000/ws';
 
@@ -87,6 +89,22 @@ function App() {
     }
   };
 
+  const handleApplyGeminiConfig = async (config: GeminiConfig) => {
+    if (!client) {
+      console.error('Client not initialized');
+      return;
+    }
+
+    try {
+      await client.sendGeminiConfig(config);
+      console.log('Gemini configuration sent:', config);
+      alert('Gemini configuration applied successfully!');
+    } catch (err) {
+      console.error('Failed to send Gemini config:', err);
+      alert('Failed to apply Gemini configuration. Make sure you are connected.');
+    }
+  };
+
   return (
     <div className="app">
       <h1>WebRTC Enterprise - React Example</h1>
@@ -150,6 +168,9 @@ function App() {
         <div className="audio-visualizer">
           {isStreaming ? '🎤 Audio streaming...' : 'Audio inactive'}
         </div>
+
+        {/* Gemini Configuration Panel */}
+        <GeminiConfigPanel onApply={handleApplyGeminiConfig} />
 
         {/* Chat Interface */}
         <div className="chat-container">

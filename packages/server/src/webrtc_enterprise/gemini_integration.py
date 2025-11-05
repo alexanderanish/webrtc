@@ -6,11 +6,11 @@ Handles bi-directional audio/video streaming with Gemini
 import asyncio
 import logging
 import json
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Dict
 import google.generativeai as genai
 from google.ai.generativelanguage_v1alpha import LiveConfig
 
-from .types import SessionConfig
+from .types import GeminiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +21,17 @@ class GeminiIntegration:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.0-flash-exp",
-        system_instruction: Optional[str] = None,
+        config: Optional[GeminiConfig] = None,
     ):
         """
         Initialize Gemini integration
 
         Args:
             api_key: Google AI API key
-            model_name: Gemini model to use
-            system_instruction: Optional system instruction for the model
+            config: Complete Gemini configuration
         """
         self.api_key = api_key
-        self.model_name = model_name
-        self.system_instruction = system_instruction
+        self.config = config or GeminiConfig()
         self.client = None
         self.session = None
         self.is_connected = False
@@ -42,34 +39,153 @@ class GeminiIntegration:
         # Configure the API
         genai.configure(api_key=api_key)
 
-    async def connect(
-        self,
-        config: Optional[LiveConfig] = None,
-    ) -> None:
+    def _build_live_config(self) -> Dict[str, Any]:
+        """Build LiveConfig from GeminiConfig"""
+        live_config = {
+            "response_modalities": self.config.response_modalities,
+        }
+
+        # Add generation config
+        if self.config.generation_config:
+            gen_config = {}
+            if self.config.generation_config.temperature is not None:
+                gen_config["temperature"] = self.config.generation_config.temperature
+            if self.config.generation_config.top_p is not None:
+                gen_config["top_p"] = self.config.generation_config.top_p
+            if self.config.generation_config.top_k is not None:
+                gen_config["top_k"] = self.config.generation_config.top_k
+            if self.config.generation_config.max_output_tokens is not None:
+                gen_config["max_output_tokens"] = self.config.generation_config.max_output_tokens
+            if self.config.generation_config.stop_sequences:
+                gen_config["stop_sequences"] = self.config.generation_config.stop_sequences
+            if self.config.generation_config.presence_penalty is not None:
+                gen_config["presence_penalty"] = self.config.generation_config.presence_penalty
+            if self.config.generation_config.frequency_penalty is not None:
+                gen_config["frequency_penalty"] = self.config.generation_config.frequency_penalty
+
+            if gen_config:
+                live_config["generation_config"] = gen_config
+
+        # Add speech config
+        if self.config.speech_config:
+            speech_config = {}
+            if self.config.speech_config.language_code:
+                speech_config["language_code"] = self.config.speech_config.language_code
+
+            # Add VAD config
+            if self.config.speech_config.vad_config:
+                vad_config = {}
+                vad = self.config.speech_config.vad_config
+                if vad.start_of_speech_sensitivity is not None:
+                    vad_config["start_of_speech_sensitivity"] = vad.start_of_speech_sensitivity
+                if vad.end_of_speech_sensitivity is not None:
+                    vad_config["end_of_speech_sensitivity"] = vad.end_of_speech_sensitivity
+                if vad.prefix_padding_ms is not None:
+                    vad_config["prefix_padding_ms"] = vad.prefix_padding_ms
+                if vad.silence_duration_ms is not None:
+                    vad_config["silence_duration_ms"] = vad.silence_duration_ms
+
+                if vad_config:
+                    speech_config["vad_config"] = vad_config
+
+            if speech_config:
+                live_config["speech_config"] = speech_config
+
+        # Add voice config
+        if self.config.voice_config:
+            voice_config = {}
+            if self.config.voice_config.voice_name:
+                voice_config["voice_name"] = self.config.voice_config.voice_name
+            voice_config["preemptive_interruption"] = self.config.voice_config.preemptive_interruption
+
+            if voice_config:
+                live_config["voice_config"] = voice_config
+
+        # Add transcription config
+        if self.config.transcription_config:
+            if self.config.transcription_config.enable_input_transcription:
+                live_config["input_audio_transcription"] = {}
+            if self.config.transcription_config.enable_output_transcription:
+                live_config["output_audio_transcription"] = {}
+
+        # Add native audio features
+        if self.config.native_audio_config:
+            if self.config.native_audio_config.enable_affective_dialog:
+                live_config["enable_affective_dialog"] = True
+            if self.config.native_audio_config.enable_proactive_audio:
+                live_config["proactive_audio"] = True
+            if self.config.native_audio_config.thinking_budget is not None:
+                live_config["thinking_budget"] = self.config.native_audio_config.thinking_budget
+
+        # Add session management
+        if self.config.session_config:
+            if self.config.session_config.enable_context_window_compression:
+                compression_config = {}
+                if self.config.session_config.compression_token_threshold:
+                    compression_config["token_threshold"] = self.config.session_config.compression_token_threshold
+                live_config["context_window_compression"] = compression_config
+
+            if self.config.session_config.enable_session_resumption:
+                if self.config.session_config.session_resumption_handle:
+                    live_config["session_resumption"] = {
+                        "handle": self.config.session_config.session_resumption_handle
+                    }
+
+        # Add media resolution
+        live_config["media_resolution"] = self.config.media_resolution
+
+        # Add tools
+        if self.config.tool_config:
+            tools = []
+
+            if self.config.tool_config.enable_google_search:
+                tools.append({"google_search": {}})
+
+            if self.config.tool_config.enable_code_execution:
+                tools.append({"code_execution": {}})
+
+            if self.config.tool_config.function_declarations:
+                for func_decl in self.config.tool_config.function_declarations:
+                    func_tool = {"function_declarations": [func_decl]}
+                    if self.config.tool_config.function_behavior == "NON_BLOCKING":
+                        func_decl["behavior"] = "NON_BLOCKING"
+                    tools.append(func_tool)
+
+            if tools:
+                live_config["tools"] = tools
+
+        return live_config
+
+    async def connect(self) -> None:
         """Connect to Gemini real-time API"""
         try:
             # Initialize the model
             model_config = {
-                "model": self.model_name,
+                "model": self.config.model_name,
             }
 
-            if self.system_instruction:
-                model_config["system_instruction"] = self.system_instruction
+            if self.config.system_instruction:
+                model_config["system_instruction"] = self.config.system_instruction
 
             self.client = genai.GenerativeModel(**model_config)
 
-            # Configure live session
-            live_config = config or LiveConfig(
-                response_modalities=["AUDIO"],
-            )
+            # Build and configure live session
+            live_config = self._build_live_config()
 
             # Start live session
+            enable_auto_calling = (
+                self.config.tool_config.enable_automatic_function_calling
+                if self.config.tool_config
+                else True
+            )
+
             self.session = self.client.start_chat(
-                enable_automatic_function_calling=True,
+                enable_automatic_function_calling=enable_auto_calling,
             )
 
             self.is_connected = True
-            logger.info(f"Connected to Gemini model: {self.model_name}")
+            logger.info(f"Connected to Gemini model: {self.config.model_name}")
+            logger.info(f"Live config: {json.dumps(live_config, indent=2)}")
 
         except Exception as e:
             logger.error(f"Failed to connect to Gemini: {e}")
@@ -145,10 +261,8 @@ class GeminiWebRTCBridge:
     def __init__(
         self,
         gemini: GeminiIntegration,
-        session_config: SessionConfig,
     ):
         self.gemini = gemini
-        self.config = session_config
         self.audio_buffer = bytearray()
         self.is_running = False
 

@@ -18,6 +18,15 @@ export type {
   ConnectionStats,
   WebRTCClientEvents,
   WebRTCClientInterface,
+  GeminiConfig,
+  GeminiGenerationConfig,
+  GeminiVoiceConfig,
+  GeminiVADConfig,
+  GeminiSpeechConfig,
+  GeminiTranscriptionConfig,
+  GeminiNativeAudioConfig,
+  GeminiSessionConfig,
+  GeminiToolConfig,
 } from './types';
 export type {
   UseWebRTCOptions,

@@ -137,6 +137,28 @@ export class WebRTCClient extends EventEmitter<WebRTCClientEvents> implements We
   }
 
   /**
+   * Send Gemini configuration to the server
+   */
+  async sendGeminiConfig(config: any): Promise<void> {
+    if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+      throw new Error('Data channel is not open');
+    }
+
+    try {
+      const message = {
+        type: 'config',
+        gemini_config: config,
+        timestamp: Date.now(),
+      };
+      this.dataChannel.send(JSON.stringify(message));
+    } catch (error) {
+      const err = new Error(`Failed to send Gemini config: ${error}`);
+      this.emit('error', err);
+      throw err;
+    }
+  }
+
+  /**
    * Get connection statistics
    */
   async getStats(): Promise<ConnectionStats> {

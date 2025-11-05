@@ -24,6 +24,8 @@ from webrtc_enterprise import (
     GeminiWebRTCBridge,
     SessionConfig,
     MediaConfig,
+    GeminiConfig,
+    gemini_config_from_dict,
 )
 
 # Load environment variables
@@ -60,16 +62,9 @@ async def lifespan(app: FastAPI):
     webrtc_server = WebRTCServer(media_config=media_config)
     logger.info("WebRTC server initialized")
 
-    # Initialize Gemini if API key is provided
+    # Check if API key is available (but don't initialize yet - will be done per-session with custom config)
     api_key = os.getenv("GEMINI_API_KEY")
-    if api_key:
-        gemini = GeminiIntegration(
-            api_key=api_key,
-            model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
-            system_instruction="You are a helpful AI assistant communicating via WebRTC. Be concise and friendly.",
-        )
-        logger.info("Gemini integration initialized")
-    else:
+    if not api_key:
         logger.warning("GEMINI_API_KEY not set, Gemini features disabled")
 
     yield
@@ -104,21 +99,23 @@ app.add_middleware(
 @app.get("/")
 async def root():
     """Health check endpoint"""
+    api_key = os.getenv("GEMINI_API_KEY")
     return {
         "status": "healthy",
         "service": "WebRTC Enterprise Server",
         "version": "1.0.0",
-        "gemini_enabled": gemini is not None,
+        "gemini_enabled": api_key is not None,
     }
 
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    api_key = os.getenv("GEMINI_API_KEY")
     return {
         "status": "healthy",
         "webrtc_server": webrtc_server is not None,
-        "gemini_integration": gemini is not None,
+        "gemini_api_key_set": api_key is not None,
         "active_sessions": len(webrtc_server.sessions) if webrtc_server else 0,
     }
 
@@ -135,19 +132,38 @@ async def websocket_endpoint(websocket: WebSocket):
 
     session_id = None
     bridge: Optional[GeminiWebRTCBridge] = None
+    gemini_integration: Optional[GeminiIntegration] = None
 
     try:
         # Accept the WebSocket connection
         await websocket.accept()
         logger.info(f"WebSocket connection accepted from {websocket.client}")
 
-        # Create session configuration
+        # Wait for initial configuration message from client
         import uuid
         session_id = str(uuid.uuid4())
 
+        # Get API key
+        api_key = os.getenv("GEMINI_API_KEY")
+        use_gemini = api_key is not None
+
+        # Create default session configuration
+        gemini_config = None
+
+        # Check if client sends a configuration message first
+        # We'll parse it from the signaling messages in the signaling handler
+        # For now, create a default config
+        if use_gemini:
+            # Create default Gemini config
+            gemini_config = GeminiConfig(
+                model_name=os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+                system_instruction="You are a helpful AI assistant communicating via WebRTC. Be concise and friendly.",
+            )
+
         session_config = SessionConfig(
             session_id=session_id,
-            use_gemini=gemini is not None,
+            use_gemini=use_gemini,
+            gemini_config=gemini_config,
             enable_audio=True,
             enable_video=False,
             enable_data_channel=True,
@@ -158,8 +174,12 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info(f"Created session: {session_id}")
 
         # Set up Gemini bridge if available
-        if gemini and session_config.use_gemini:
-            bridge = GeminiWebRTCBridge(gemini, session_config)
+        if use_gemini and api_key and gemini_config:
+            gemini_integration = GeminiIntegration(
+                api_key=api_key,
+                config=gemini_config,
+            )
+            bridge = GeminiWebRTCBridge(gemini_integration)
             await bridge.start()
 
             # Connect audio processing pipeline
@@ -182,6 +202,25 @@ async def websocket_endpoint(websocket: WebSocket):
                             "timestamp": data.get("timestamp"),
                         })
                         await session.send_data(response_data)
+                    elif data.get("type") == "config" and data.get("gemini_config"):
+                        # Client sent updated Gemini config
+                        logger.info("Received Gemini config update from client")
+                        new_gemini_config = gemini_config_from_dict(data["gemini_config"])
+
+                        # Restart bridge with new config
+                        nonlocal gemini_integration, bridge
+                        if bridge:
+                            await bridge.stop()
+
+                        gemini_integration = GeminiIntegration(
+                            api_key=api_key,
+                            config=new_gemini_config,
+                        )
+                        bridge = GeminiWebRTCBridge(gemini_integration)
+                        await bridge.start()
+                        session.on_audio_frame = bridge.process_audio_frame
+
+                        logger.info(f"Gemini config updated for session: {session_id}")
 
                 except Exception as e:
                     logger.error(f"Error handling data message: {e}")
