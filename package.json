@@ -1,0 +1,34 @@
+{
+  "name": "webrtc-enterprise-monorepo",
+  "version": "1.0.0",
+  "description": "Enterprise-grade WebRTC library for React and FastAPI with Gemini integration",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build:client": "cd packages/client && npm run build",
+    "dev:react": "cd examples/react-app && npm run dev",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces",
+    "clean": "rm -rf node_modules packages/*/node_modules packages/*/dist examples/*/node_modules examples/*/dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/webrtc-enterprise.git"
+  },
+  "keywords": [
+    "webrtc",
+    "react",
+    "fastapi",
+    "gemini",
+    "real-time",
+    "enterprise"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
