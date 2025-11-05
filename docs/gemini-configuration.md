@@ -4,16 +4,64 @@ This document provides a comprehensive guide to all configurable features of the
 
 ## Table of Contents
 
-1. [Model Configuration](#model-configuration)
-2. [Response Configuration](#response-configuration)
-3. [Generation Settings](#generation-settings)
-4. [Voice Configuration](#voice-configuration)
-5. [Speech Configuration](#speech-configuration)
-6. [Transcription Settings](#transcription-settings)
-7. [Native Audio Features](#native-audio-features)
-8. [Session Management](#session-management)
-9. [Tools & Function Calling](#tools--function-calling)
-10. [Frontend Usage](#frontend-usage)
+1. [Push-to-Talk Feature](#push-to-talk-feature)
+2. [Model Configuration](#model-configuration)
+3. [Response Configuration](#response-configuration)
+4. [Generation Settings](#generation-settings)
+5. [Voice Configuration](#voice-configuration)
+6. [Speech Configuration](#speech-configuration)
+7. [Transcription Settings](#transcription-settings)
+8. [Native Audio Features](#native-audio-features)
+9. [Session Management](#session-management)
+10. [Tools & Function Calling](#tools--function-calling)
+11. [Frontend Usage](#frontend-usage)
+
+## Push-to-Talk Feature
+
+The WebRTC client includes a built-in push-to-talk (PTT) feature that gives users precise control over when audio is transmitted.
+
+### Features
+
+- **Toggle Mode**: Switch between PTT mode and always-on audio mode with a checkbox
+- **Multiple Input Methods**:
+  - Hold the PTT button with mouse or touch
+  - Press and hold the Space bar (default) on keyboard
+- **Visual Feedback**:
+  - Large circular button changes color when active
+  - Pulsing animation while transmitting
+  - Status indicator shows "Transmitting" or "Standby"
+- **Smart Detection**: Keyboard shortcut is disabled when typing in input fields
+- **Efficient**: Mutes/unmutes audio tracks without stopping the stream
+
+### Usage
+
+1. **Start Audio**: Click "Start Audio" to begin streaming
+2. **Enable PTT**: Check the "Push-to-Talk Mode" checkbox
+3. **Transmit**:
+   - Hold down the circular PTT button, OR
+   - Press and hold the Space bar
+4. **Release**: Audio stops transmitting when you release
+
+### Benefits with Gemini Live
+
+- **Reduces bandwidth**: Only transmits when you're actively speaking
+- **Better VAD integration**: Works seamlessly with Voice Activity Detection
+- **Privacy**: Prevents accidental audio transmission
+- **Professional conversations**: Gives control similar to radio/walkie-talkie communication
+
+### Technical Details
+
+PTT mode works by enabling/disabling the audio tracks without stopping the entire media stream:
+
+```typescript
+// Enable audio transmission
+audioTrack.enabled = true;
+
+// Disable audio transmission (mute)
+audioTrack.enabled = false;
+```
+
+This approach is more efficient than starting/stopping the stream repeatedly.
 
 ## Model Configuration
 

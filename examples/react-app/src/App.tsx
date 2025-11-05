@@ -12,6 +12,9 @@ const SIGNALING_URL = 'ws://localhost:8000/ws';
 
 function App() {
   const [messageInput, setMessageInput] = useState('');
+  const [pttMode, setPttMode] = useState(false); // Toggle between PTT and always-on mode
+  const [isPttActive, setIsPttActive] = useState(false); // Currently holding PTT
+  const [pttKey, setPttKey] = useState('Space'); // Configurable PTT key
 
   const {
     client,
@@ -32,13 +35,23 @@ function App() {
 
   const localAudioRef = useRef<HTMLAudioElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const audioTracksRef = useRef<MediaStreamTrack[]>([]);
 
   // Update local audio element when stream changes
   useEffect(() => {
     if (localAudioRef.current && stream) {
       localAudioRef.current.srcObject = stream;
+      // Store audio tracks for PTT control
+      audioTracksRef.current = stream.getAudioTracks();
+
+      // If in PTT mode, start with audio muted
+      if (pttMode && audioTracksRef.current.length > 0) {
+        audioTracksRef.current.forEach(track => {
+          track.enabled = false;
+        });
+      }
     }
-  }, [stream]);
+  }, [stream, pttMode]);
 
   // Update remote audio element when remote streams change
   useEffect(() => {
@@ -46,6 +59,50 @@ function App() {
       remoteAudioRef.current.srcObject = remoteStreams[0];
     }
   }, [remoteStreams]);
+
+  // PTT keyboard handlers
+  useEffect(() => {
+    if (!pttMode || !isStreaming) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.code === pttKey && !e.repeat) {
+        e.preventDefault();
+        setIsPttActive(true);
+        // Unmute audio tracks
+        audioTracksRef.current.forEach(track => {
+          track.enabled = true;
+        });
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.code === pttKey) {
+        e.preventDefault();
+        setIsPttActive(false);
+        // Mute audio tracks
+        audioTracksRef.current.forEach(track => {
+          track.enabled = false;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [pttMode, isStreaming, pttKey]);
 
   const handleConnect = async () => {
     try {
@@ -102,6 +159,46 @@ function App() {
     } catch (err) {
       console.error('Failed to send Gemini config:', err);
       alert('Failed to apply Gemini configuration. Make sure you are connected.');
+    }
+  };
+
+  // PTT button handlers (mouse/touch)
+  const handlePttPress = () => {
+    if (!isStreaming || !pttMode) return;
+
+    setIsPttActive(true);
+    audioTracksRef.current.forEach(track => {
+      track.enabled = true;
+    });
+  };
+
+  const handlePttRelease = () => {
+    if (!isStreaming || !pttMode) return;
+
+    setIsPttActive(false);
+    audioTracksRef.current.forEach(track => {
+      track.enabled = false;
+    });
+  };
+
+  const togglePttMode = () => {
+    const newPttMode = !pttMode;
+    setPttMode(newPttMode);
+
+    // If disabling PTT mode and audio is streaming, unmute
+    if (!newPttMode && isStreaming) {
+      audioTracksRef.current.forEach(track => {
+        track.enabled = true;
+      });
+      setIsPttActive(false);
+    }
+
+    // If enabling PTT mode and audio is streaming, mute
+    if (newPttMode && isStreaming) {
+      audioTracksRef.current.forEach(track => {
+        track.enabled = false;
+      });
+      setIsPttActive(false);
     }
   };
 
@@ -164,9 +261,48 @@ function App() {
           </button>
         </div>
 
+        {/* PTT Controls */}
+        <div className="ptt-controls">
+          <label className="ptt-toggle">
+            <input
+              type="checkbox"
+              checked={pttMode}
+              onChange={togglePttMode}
+              disabled={!isStreaming}
+            />
+            <span>Push-to-Talk Mode</span>
+          </label>
+
+          {pttMode && isStreaming && (
+            <div className="ptt-section">
+              <button
+                className={`btn-ptt ${isPttActive ? 'active' : ''}`}
+                onMouseDown={handlePttPress}
+                onMouseUp={handlePttRelease}
+                onMouseLeave={handlePttRelease}
+                onTouchStart={handlePttPress}
+                onTouchEnd={handlePttRelease}
+              >
+                {isPttActive ? '🎤 TALKING' : '🎤 Hold to Talk'}
+              </button>
+              <div className="ptt-hint">
+                Press and hold <kbd>{pttKey}</kbd> or the button above to talk
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Audio Visualizer */}
         <div className="audio-visualizer">
-          {isStreaming ? '🎤 Audio streaming...' : 'Audio inactive'}
+          {isStreaming ? (
+            pttMode ? (
+              isPttActive ? '🎤 PTT Active - Transmitting...' : '🔇 PTT Standby - Press to talk'
+            ) : (
+              '🎤 Audio streaming...'
+            )
+          ) : (
+            'Audio inactive'
+          )}
         </div>
 
         {/* Gemini Configuration Panel */}
